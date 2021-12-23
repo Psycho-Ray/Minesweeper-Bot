@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import multiprocessing
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import total_ordering
 from random import randint
-from typing import List, Tuple
+from typing import List, Tuple, Generator
 
 import numpy as np
 from botcity.web import WebBot
@@ -131,17 +132,20 @@ class Bot(WebBot):
 
         return True
 
+    def find_all_helper(self, label) -> List[Cell]:
+        findings = self.find_all(label, matching=0.98, waiting_time=100)
+        return [Cell(content=label, element=element) for element in findings]
+
     def update_grid(self, game_over_restart: bool = True):
         # Init
         self.grid = []
         expected_size = self.height * self.width
 
-        # Finds all fields of the game
+        # Finds all the cells in the grid
         for label in labels:
-            findings = self.find_all(label, matching=0.98, waiting_time=100)
-            cells = [Cell(content=label, element=element) for element in findings]
+            cells = self.find_all_helper(label)
             self.grid.extend(cells)
-            if len(self.grid) == self.height * self.width:
+            if len(self.grid) >= self.height * self.width:
                 break
 
         # Checks for a Game over
@@ -172,36 +176,43 @@ class Bot(WebBot):
 
     def play_turn(self):
         # Init
-        played = False
+        played_once = False
+        played = True
 
-        # For each field of the game grid...
-        for (row, col), cell in np.ndenumerate(self.grid):
-            # Looks for a numeric cell
-            if cell.content in ['closed', 'empty', 'flag', 'open']:
-                continue
+        while played:
+            # Plays until it needs to update the GUI
+            played = False
 
-            # Grabs information about the cell's surroundings
-            remaining_bombs = int(cell.content) - self.flags_around(row, col)
-            closed_cells = self.closed_cells_around(row, col)
+            # For each field of the game grid...
+            for (row, col), cell in np.ndenumerate(self.grid):
+                # Looks for a numeric cell
+                if cell.content in ['closed', 'empty', 'flag', 'open']:
+                    continue
 
-            # Integrity verification
-            assert 0 <= remaining_bombs <= len(closed_cells)
+                # Grabs information about the cell's surroundings
+                remaining_bombs = int(cell.content) - self.flags_around(row, col)
+                closed_cells = self.closed_cells_around(row, col)
 
-            # Safe land exploration
-            if remaining_bombs == 0:
-                for safe_land in closed_cells:
-                    self.update_cell(safe_land, 'open')
-                    played = True
+                # Integrity verification
+                assert 0 <= remaining_bombs <= len(closed_cells)
 
-            # Bomb discovery
-            elif remaining_bombs == len(closed_cells):
-                for hidden_bomb in closed_cells:
-                    self.update_cell(hidden_bomb, 'flag')
-                    self.kickstart = False
-                    played = True
+                # Safe land exploration
+                if remaining_bombs == 0:
+                    for safe_land in closed_cells:
+                        self.update_cell(safe_land, 'open')
+                        played = True
+                        played_once = True
+
+                # Bomb discovery
+                elif remaining_bombs == len(closed_cells):
+                    for hidden_bomb in closed_cells:
+                        self.update_cell(hidden_bomb, 'flag')
+                        self.kickstart = False
+                        played = True
+                        played_once = True
 
         # Advanced mechanics
-        if not played and not self.kickstart:
+        if not played_once and not self.kickstart:
             # Finds a start point for a simulation
             for (row, col), cell in np.ndenumerate(self.grid):
                 # Looks for a numeric cell
@@ -227,16 +238,16 @@ class Bot(WebBot):
                         if not self.simulation((i, j), 'open'):
                             print(f"Performing advanced play at cell ({i}, {j})")
                             self.update_cell(self.grid[i][j], 'flag')
-                            played = True
+                            played_once = True
 
-                        # Simulates the cell containing a bomb. If the simulation fails, then the cell is a safe land.
+                        # Simulates the cell containing a bomb. If the simulation fails, the cell is a safe land.
                         elif not self.simulation((i, j), 'flag'):
                             print(f"Performing advanced play at cell ({i}, {j})")
                             self.update_cell(self.grid[i][j], 'open')
-                            played = True
+                            played_once = True
 
         # Out of options
-        if not played:
+        if not played_once:
             # Grabs a random closed cell
             random_cell = self.random_cell()
             while random_cell.content != 'closed':
