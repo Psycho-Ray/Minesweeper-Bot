@@ -1,4 +1,4 @@
 # Minesweeper Bot
 
-This is a bot that plays the classic Microft Minesweeper game!
+This is a bot that plays the classic Microsoft Minesweeper game!
 
